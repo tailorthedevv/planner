@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Modular Event Planner</title>
+    <style>
+        :root {
+            --bg: #1e1e24;
+            --surface: #2b2b36;
+            --primary: #4e8cff;
+            --text: #ffffff;
+            --text-muted: #a0a0b0;
+            --border: #3d3d4b;
+            --danger: #ff4e4e;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        
+        body { background-color: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+        /* Toolbar */
+        .toolbar { background-color: var(--surface); padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); }
+        .toolbar h1 { font-size: 1.2rem; }
+        .btn { background: var(--primary); color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 0.9rem; margin-left: 10px; }
+        .btn:hover { opacity: 0.9; }
+        .btn-danger { background: var(--danger); }
+
+        /* Main App Area */
+        .app-container { display: flex; flex: 1; overflow: hidden; }
+
+        /* Sidebar Palette */
+        .sidebar { width: 250px; background-color: var(--surface); border-right: 1px solid var(--border); padding: 20px; overflow-y: auto; }
+        .sidebar h2 { font-size: 1rem; margin-bottom: 15px; color: var(--text-muted); }
+        .palette-item { background: var(--bg); border: 1px dashed var(--border); padding: 12px; margin-bottom: 10px; border-radius: 6px; cursor: grab; user-select: none; transition: 0.2s; }
+        .palette-item:hover { border-color: var(--primary); }
+        
+        /* Canvas */
+        .canvas { flex: 1; position: relative; overflow: auto; background: radial-gradient(circle, var(--border) 1px, transparent 1px); background-size: 20px 20px; }
+
+        /* Draggable Nodes */
+        .node { position: absolute; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; width: 220px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); display: flex; flex-direction: column; }
+        .node-header { padding: 8px; background: rgba(0,0,0,0.2); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; cursor: grab; border-radius: 6px 6px 0 0; }
+        .node-header:active { cursor: grabbing; }
+        .node-title { font-weight: bold; font-size: 0.9rem; pointer-events: none; text-transform: capitalize;}
+        .node-actions button { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 1rem; margin-left: 5px; }
+        .node-actions button:hover { color: var(--text); }
+        .node-content { padding: 12px; font-size: 0.9rem; color: #ddd; word-wrap: break-word; }
+        
+        /* Specific Node Styles */
+        .budget-row { display: flex; justify-content: space-between; border-bottom: 1px solid var(--border); margin-bottom: 5px; padding-bottom: 5px; }
+        .budget-total { font-weight: bold; color: var(--primary); text-align: right; margin-top: 5px; }
+        .tech-item { background: var(--bg); padding: 4px 8px; border-radius: 4px; margin-bottom: 5px; font-size: 0.8rem; }
+        .area-box { border: 2px dashed var(--primary); padding: 10px; text-align: center; background: rgba(78, 140, 255, 0.1); }
+        .node a { color: var(--primary); text-decoration: none; }
+        .node a:hover { text-decoration: underline; }
+
+        /* Modal */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); justify-content: center; align-items: center; z-index: 1000; }
+        .modal { background: var(--surface); padding: 20px; border-radius: 8px; width: 400px; border: 1px solid var(--border); }
+        .modal h2 { margin-bottom: 15px; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; font-size: 0.9rem; color: var(--text-muted); }
+        .form-group input, .form-group textarea { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border); padding: 8px; border-radius: 4px; }
+        .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+    </style>
+</head>
+<body>
+
+    <div class="toolbar">
+        <h1>Modular Event Planner</h1>
+        <div>
+            <button class="btn" onclick="exportData()">Export (Base64)</button>
+            <button class="btn" onclick="importData()">Import</button>
+            <button class="btn btn-danger" onclick="clearCanvas()">Clear</button>
+        </div>
+    </div>
+
+    <div class="app-container">
+        <div class="sidebar" id="palette">
+            <h2>Elements</h2>
+            <div class="palette-item" draggable="true" ondragstart="dragStart(event, 'text')">📝 Text Box</div>
+            <div class="palette-item" draggable="true" ondragstart="dragStart(event, 'budget')">💰 Budget Tracker</div>
+            <div class="palette-item" draggable="true" ondragstart="dragStart(event, 'tech')">🔌 Technical & AV</div>
+            <div class="palette-item" draggable="true" ondragstart="dragStart(event, 'area')">📐 Area / Zone</div>
+            <div class="palette-item" draggable="true" ondragstart="dragStart(event, 'link')">🔗 Reference Link</div>
+            <br>
+            <p style="font-size: 0.8rem; color: var(--text-muted);">Drag items onto the canvas. Drag headers to move them.</p>
+        </div>
+
+        <div class="canvas" id="canvas" ondragover="allowDrop(event)" ondrop="drop(event)">
+            <!-- Nodes are rendered here -->
+        </div>
+    </div>
+
+    <!-- Edit Modal -->
+    <div class="modal-overlay" id="modalOverlay">
+        <div class="modal">
+            <h2 id="modalTitle">Edit Element</h2>
+            <div id="modalForm"></div>
+            <div class="modal-actions">
+                <button class="btn" style="background: transparent; border: 1px solid var(--border);" onclick="closeModal()">Cancel</button>
+                <button class="btn" onclick="saveModal()">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- State Management ---
+        let elements = [];
+        let draggedType = null;
+        let editingId = null;
+        let zIndexCounter = 10;
+
+        // Default schemas for different components
+        const schemas = {
+            text: { text: "Notes..." },
+            budget: { items: "Venue: 500\nCatering: 250\nStaff: 150" }, // Simple text parsing for ease
+            tech: { equipment: "2x Wireless Mics\n1x Projector\nPower Drops" },
+            area: { name: "Main Stage", width: "10", height: "5" },
+            link: { label: "Vendor Document", url: "https://example.com" }
+        };
+
+        // --- Drag and Drop from Palette ---
+        function dragStart(e, type) {
+            draggedType = type;
+            e.dataTransfer.setData("text/plain", type);
+        }
+
+        function allowDrop(e) {
+            e.preventDefault();
+        }
+
+        function drop(e) {
+            e.preventDefault();
+            if (!draggedType) return;
+            
+            const rect = document.getElementById('canvas').getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            addElement(draggedType, x, y);
+            draggedType = null;
+        }
+
+        // --- Element Logic ---
+        function generateId() {
+            return '_' + Math.random().toString(36).substr(2, 9);
+        }
+
+        function addElement(type, x, y, data = null, id = null) {
+            const el = {
+                id: id || generateId(),
+                type: type,
+                x: x,
+                y: y,
+                z: zIndexCounter++,
+                data: data ? JSON.parse(JSON.stringify(data)) : JSON.parse(JSON.stringify(schemas[type]))
+            };
+            elements.push(el);
+            renderCanvas();
+        }
+
+        function deleteElement(id) {
+            elements = elements.filter(el => el.id !== id);
+            renderCanvas();
+        }
+
+        function duplicateElement(id) {
+            const el = elements.find(e => e.id === id);
+            if (el) {
+                addElement(el.type, el.x + 20, el.y + 20, el.data);
+            }
+        }
+
+        // --- Rendering ---
+        function renderCanvas() {
+            const canvas = document.getElementById('canvas');
+            canvas.innerHTML = '';
+            
+            elements.forEach(el => {
+                const node = document.createElement('div');
+                node.className = 'node';
+                node.style.left = el.x + 'px';
+                node.style.top = el.y + 'px';
+                node.style.zIndex = el.z;
+                node.id = el.id;
+
+                // Header
+                const header = document.createElement('div');
+                header.className = 'node-header';
+                header.innerHTML = `
+                    <span class="node-title">${el.type}</span>
+                    <div class="node-actions">
+                        <button onclick="openEditModal('${el.id}')" title="Edit">✎</button>
+                        <button onclick="duplicateElement('${el.id}')" title="Duplicate">⧉</button>
+                        <button onclick="deleteElement('${el.id}')" title="Delete">✕</button>
+                    </div>
+                `;
+
+                // Header Dragging Event Listeners
+                header.addEventListener('mousedown', (e) => startNodeDrag(e, el.id));
+
+                // Content
+                const content = document.createElement('div');
+                content.className = 'node-content';
+                content.innerHTML = renderNodeContent(el);
+
+                node.appendChild(header);
+                node.appendChild(content);
+                canvas.appendChild(node);
+            });
+        }
+
+        function renderNodeContent(el) {
+            const d = el.data;
+            switch(el.type) {
+                case 'text':
+                    return `<p>${d.text.replace(/\n/g, '<br>')}</p>`;
+                case 'budget':
+                    let total = 0;
+                    let rows = d.items.split('\n').map(line => {
+                        let parts = line.split(':');
+                        if (parts.length === 2) {
+                            let cost = parseFloat(parts[1]);
+                            if(!isNaN(cost)) total += cost;
+                            return `<div class="budget-row"><span>${parts[0]}</span><span>$${parts[1].trim()}</span></div>`;
+                        }
+                        return '';
+                    }).join('');
+                    return `${rows}<div class="budget-total">Total: $${total.toFixed(2)}</div>`;
+                case 'tech':
+                    return d.equipment.split('\n').map(req => `<div class="tech-item">▪ ${req}</div>`).join('');
+                case 'area':
+                    return `<div class="area-box">
+                                <strong>${d.name}</strong><br>
+                                ${d.width}m x ${d.height}m
+                            </div>`;
+                case 'link':
+                    return `🔗 <a href="${d.url}" target="_blank">${d.label}</a>`;
+                default:
+                    return '';
+            }
+        }
+
+        // --- Canvas Element Dragging ---
+        let activeDragId = null;
+        let dragOffsetX = 0;
+        let dragOffsetY = 0;
+
+        function startNodeDrag(e, id) {
+            if (e.target.tagName.toLowerCase() === 'button') return; // Ignore button clicks
+            activeDragId = id;
+            const el = elements.find(e => e.id === id);
+            
+            // Bring to front
+            el.z = zIndexCounter++;
+            document.getElementById(id).style.zIndex = el.z;
+
+            const rect = document.getElementById('canvas').getBoundingClientRect();
+            // Calculate mouse offset relative to the element's top-left
+            dragOffsetX = e.clientX - rect.left - el.x;
+            dragOffsetY = e.clientY - rect.top - el.y;
+
+            document.addEventListener('mousemove', onNodeDrag);
+            document.addEventListener('mouseup', stopNodeDrag);
+        }
+
+        function onNodeDrag(e) {
+            if (!activeDragId) return;
+            const el = elements.find(e => e.id === activeDragId);
+            const rect = document.getElementById('canvas').getBoundingClientRect();
+            
+            el.x = e.clientX - rect.left - dragOffsetX;
+            el.y = e.clientY - rect.top - dragOffsetY;
+
+            // Optional: Clamp to canvas boundaries (0,0 minimums)
+            if(el.x < 0) el.x = 0;
+            if(el.y < 0) el.y = 0;
+
+            const node = document.getElementById(activeDragId);
+            node.style.left = el.x + 'px';
+            node.style.top = el.y + 'px';
+        }
+
+        function stopNodeDrag() {
+            activeDragId = null;
+            document.removeEventListener('mousemove', onNodeDrag);
+            document.removeEventListener('mouseup', stopNodeDrag);
+        }
+
+        // --- Modal & Editing ---
+        function openEditModal(id) {
+            editingId = id;
+            const el = elements.find(e => e.id === id);
+            const form = document.getElementById('modalForm');
+            form.innerHTML = '';
+            document.getElementById('modalTitle').innerText = `Edit ${el.type}`;
+
+            // Generate form fields dynamically based on data keys
+            for (let key in el.data) {
+                const group = document.createElement('div');
+                group.className = 'form-group';
+                
+                const label = document.createElement('label');
+                label.innerText = key.charAt(0).toUpperCase() + key.slice(1);
+                
+                let input;
+                // Use textarea for multiline data
+                if (key === 'text' || key === 'items' || key === 'equipment') {
+                    input = document.createElement('textarea');
+                    input.rows = 4;
+                } else {
+                    input = document.createElement('input');
+                    input.type = 'text';
+                }
+                
+                input.id = `edit_${key}`;
+                input.value = el.data[key];
+                
+                group.appendChild(label);
+                group.appendChild(input);
+                form.appendChild(group);
+            }
+
+            document.getElementById('modalOverlay').style.display = 'flex';
+        }
+
+        function closeModal() {
+            document.getElementById('modalOverlay').style.display = 'none';
+            editingId = null;
+        }
+
+        function saveModal() {
+            const el = elements.find(e => e.id === editingId);
+            for (let key in el.data) {
+                el.data[key] = document.getElementById(`edit_${key}`).value;
+            }
+            closeModal();
+            renderCanvas();
+        }
+
+        // --- Export / Import Base64 JSON String ---
+        function exportData() {
+            if(elements.length === 0) {
+                alert("Canvas is empty. Nothing to export.");
+                return;
+            }
+            const jsonString = JSON.stringify(elements);
+            // encodeURIComponent fixes issues with special characters in btoa
+            const base64String = btoa(encodeURIComponent(jsonString)); 
+            
+            // Show prompt to allow user to copy easily
+            prompt("Here is your event layout data! Copy this string to save your progress:", base64String);
+        }
+
+        function importData() {
+            const base64String = prompt("Paste your Base64 event layout string here:");
+            if (!base64String) return;
+
+            try {
+                const jsonString = decodeURIComponent(atob(base64String));
+                const importedData = JSON.parse(jsonString);
+                
+                if (Array.isArray(importedData)) {
+                    elements = importedData;
+                    renderCanvas();
+                } else {
+                    alert("Invalid data format.");
+                }
+            } catch (error) {
+                alert("Failed to import. The string might be corrupted or invalid.");
+            }
+        }
+
+        function clearCanvas() {
+            if(confirm("Are you sure you want to clear the entire layout?")) {
+                elements = [];
+                renderCanvas();
+            }
+        }
+    </script>
+</body>
+</html>
